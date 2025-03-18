@@ -52,7 +52,8 @@ def download_documents(start_date: str, end_date: str) -> pd.DataFrame:
     e.g.:
     download_documents("2021-01-01", "2021-01-31")
     """
-    data = request("624505", start_date, end_date)
+    client = dtx()
+    data = client.download_data("624505", start_date, end_date, columnas = {"1_1684":"document", "1_1515":"id_donant", "1_881":"Data de la donació"})
     documents_data = pd.DataFrame()
     # Iterate through each row in the DataFrame
     for index, row in data.iterrows():
