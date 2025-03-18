@@ -31,12 +31,12 @@ def pipeline_db(start_date="01/01/2025", end_date=None):
         df.to_pickle(DATA_ROOT / "transformed" / f"{name}.pkl")
     
     if insert_data(db):
-        logger.info("Pipeline executed successfully")
+        logger.info("Pipeline ejecutada correctamente")
 
-        logger.info("Cleaning up temporary files...")
+        logger.info("Eliminando ficheros temporales...")
         shutil.rmtree(DATA_ROOT / "tmp", ignore_errors=True)
         shutil.rmtree(DATA_ROOT / "transformed", ignore_errors=True)
-        logger.info("Temporary files removed")
+        logger.info("Ficheros temporales eliminados")
 
 
 def main():
