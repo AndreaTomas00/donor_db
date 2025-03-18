@@ -112,8 +112,11 @@ class dtx:
             df = pd.DataFrame(rows)
             # Create new variable id_donant (primary key for the donor DB)
             df["id_donant"] = df["1_881"] + "_" + df["1_1515"]
+            print(df.columns)
             # Rename columns with mapping
             df.rename(columns = columns, inplace=True)
+            print(df.columns)
+
             return df
 
         except Exception:

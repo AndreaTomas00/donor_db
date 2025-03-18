@@ -15,7 +15,9 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from src.config import DATA_ROOT
+from src.features.features import download_documents
 from src.features.utils import load_params
+from src.pipeline.dtx import dtx
 from src.pipeline.extract import extract_data
 from src.pipeline.load import insert_data
 from src.pipeline.transform import transform_df
@@ -212,30 +214,10 @@ def cmd_download_documents(
         task = progress.add_task("[green]Descargando documentos...", total=1)
 
         try:
-            # Import here to avoid circular imports
-            from src.pipeline.dtx import dtx
-            dtx_client = dtx()
-            dtx_client.download_documents(start_date, end_date)
-            progress.update(task, completed=1)
-
-            # Check if any documents were downloaded
-            documents_dir = Path(DATA_ROOT) / "Documents"
-            documents = list(documents_dir.glob("*.pdf"))
-
-            if documents:
-                console.print(f"[bold green]¡{len(documents)} documentos descargados correctamente![/bold green]")
-
-                table = Table(title="Documentos Descargados")
-                table.add_column("Nombre", style="green")
-                table.add_column("Tamaño (KB)", justify="right", style="blue")
-
-                for doc in documents[:5]:  # Show first 5 documents
-                    table.add_row(doc.name, f"{doc.stat().st_size / 1024:.1f}")
-
-                if len(documents) > 5:
-                    table.add_row(f"... y {len(documents) - 5} más", "")
-
-                console.print(table)
+            documents_data = download_documents(start_date, end_date)
+            if documents_data is not None:
+                progress.update(task, completed=1)
+                console.print("[green]✓ Documentos descargados correctamente[/green]")
             else:
                 console.print("[yellow]No se encontraron documentos para descargar.[/yellow]")
 

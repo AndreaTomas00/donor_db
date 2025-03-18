@@ -11,7 +11,9 @@ import requests
 import typer
 import xmltodict
 from loguru import logger
+from src.pipeline.dtx import dtx
 from src.features.utils import load_params
+from src.config import DATA_ROOT
 import dataclasses
 
 
@@ -19,27 +21,70 @@ def extract_form_fields_from_base64(base64_document) -> dict:
     """
     Extract form fields like textboxes and radio buttons from the PDF using PyPDF2.
     """
+    replace_dict_ocatt = load_params("extract")["replace_dict_ocatt"]
     pdf_binary = base64.b64decode(base64_document)
     with tempfile.NamedTemporaryFile(delete=True, suffix=".pdf") as temp_pdf_file:
         temp_pdf_file.write(pdf_binary)
         temp_pdf_file.flush()
-        with open(temp_pdf_file.name, "rb") as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            fields = pdf_reader.get_fields()
-            form_data = {}
-            if fields:
-                for key, field in fields.items():
+        
+        # Suppress PyPDF2 warnings temporarily
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            
+            with open(temp_pdf_file.name, "rb") as file:
+                pdf_reader = PyPDF2.PdfReader(file, strict=False)
+                try:
+                    # Try to get fields, handling potential errors
                     try:
-                        field_value = field.value
-                        if isinstance(field_value, str):
-                            field_value = field_value.encode("latin1").decode("utf-8", "ignore").replace("\r", ".").replace("\n", ".")
-                            form_data[key] = field_value
-                    except Exception as field_error:
-                        print(f"Error decoding field {key}: {field_error}")
-                form_data = pd.DataFrame([form_data])
-                form_data.rename(columns=replace_dict_ocatt, inplace=True)
-                return form_data
-            return None  # Return form fields, fallback to metadata if empty
+                        fields = pdf_reader.get_fields()
+                    except Exception as e:
+                        logger.warning(f"Could not get PDF fields: {str(e)}")
+                        fields = {}
+                    
+                    form_data = {}
+                    if fields:
+                        for key, field in fields.items():
+                            try:
+                                # Only process keys that are strings
+                                if not isinstance(key, str):
+                                    continue
+                                    
+                                # Sanitize key by replacing problematic characters
+                                sanitized_key = re.sub(r'[^\x00-\x7F]+', '_', key)
+                                
+                                field_value = field.value
+                                if field_value is None:
+                                    # Skip fields with no value
+                                    continue
+                                    
+                                if isinstance(field_value, str):
+                                    # Try various encodings to handle the string correctly
+                                    try:
+                                        field_value = field_value.encode('latin1').decode('utf-8', 'ignore')
+                                    except (UnicodeEncodeError, UnicodeDecodeError):
+                                        try:
+                                            field_value = field_value.encode('utf-8').decode('utf-8', 'ignore')
+                                        except (UnicodeEncodeError, UnicodeDecodeError):
+                                            # If all else fails, just use the string as is
+                                            pass
+                                    
+                                    field_value = field_value.replace("\r", ".").replace("\n", ".")
+                                
+                                form_data[sanitized_key] = field_value
+                            except Exception as field_error:
+                                # Skip problematic fields
+                                continue
+                        
+                        form_data = pd.DataFrame([form_data])
+                        form_data.rename(columns=replace_dict_ocatt, inplace=True)
+                        return form_data
+                    
+                    return pd.DataFrame()  # Return empty DataFrame if no fields
+                except Exception as e:
+                    # Log the error but don't halt processing
+                    logger.warning(f"Error processing PDF: {str(e)}")
+                    return pd.DataFrame()  # Return empty DataFrame on error
 
 
 def download_documents(start_date: str, end_date: str) -> pd.DataFrame:
@@ -53,11 +98,12 @@ def download_documents(start_date: str, end_date: str) -> pd.DataFrame:
     download_documents("2021-01-01", "2021-01-31")
     """
     client = dtx()
-    data = client.download_data("624505", start_date, end_date, columnas = {"1_1684":"document", "1_1515":"id_donant", "1_881":"Data de la donació"})
+    data = client.download_data("624505", start_date, end_date, columns = {"1_1684":"document", "1_1515":"Data de la donació", "1_881":"Codi UCIO"})
+    print(f"Downloaded {len(data)} documents.")
     documents_data = pd.DataFrame()
     # Iterate through each row in the DataFrame
     for index, row in data.iterrows():
-        base64_document = row["1_1684"]
+        base64_document = row["document"]
         if pd.isna(base64_document) or not base64_document.strip():
             print(f"Skipping row {index} due to missing or empty Base64 data.")
             continue
@@ -68,8 +114,10 @@ def download_documents(start_date: str, end_date: str) -> pd.DataFrame:
             documents_data = pd.concat([documents_data, form_data], ignore_index=True)
         except base64.binascii.Error as e:
             print(f"Error decoding Base64 for donor with Codi_UCIO {row['1_881']} and Data de la donació {row['1_1515']}: {e}")
-    documents_data.to_csv("documents.csv", index=False)
+    os.makedirs(DATA_ROOT / "tmp/documents", exist_ok=True)
+    documents_data.to_csv(DATA_ROOT/"tmp/documents/documents.csv", index=False)
     return documents_data
+
 def conditional_update(df, index, column, new_value):
     """
     Updates a specific column in a DataFrame only if the current value is empty (NaN or "NULL").
@@ -136,3 +184,6 @@ def update_dataframes_with_csv(dfs, csv_path):
                             conditional_update(df, row_index, df_column, csv_mapping(row))
     return dfs  # Return the updated DataFrames dictionary
 
+
+if __name__ == "__main__":
+    print(len(download_documents("01/01/2025", "15/01/2025")))
